@@ -96,7 +96,9 @@ class BaseTextEditExtension(QtCore.QObject):
     def _init_flags(self):
         widget = self.widget
         widget.setMinimumSize(QtCore.QSize(10, 10))
-        widget.setWordWrapMode(QtGui.QTextOption.WordWrap)
+        widget.setWordWrapMode(
+            getattr(widget, 'word_wrap_mode', QtGui.QTextOption.WordWrap)
+        )
         widget.setLineWrapMode(widget.__class__.NoWrap)
         if self._readonly:
             widget.setReadOnly(True)
@@ -263,7 +265,9 @@ class BaseTextEditExtension(QtCore.QObject):
 class PlainTextEditExtension(BaseTextEditExtension):
     def set_linebreak(self, brk):
         if brk:
-            wrapmode = QtWidgets.QPlainTextEdit.WidgetWidth
+            wrapmode = getattr(
+                self.widget, 'line_wrap_mode', QtWidgets.QPlainTextEdit.WidgetWidth
+            )
         else:
             wrapmode = QtWidgets.QPlainTextEdit.NoWrap
         self.widget.setLineWrapMode(wrapmode)
@@ -274,13 +278,26 @@ class PlainTextEdit(QtWidgets.QPlainTextEdit):
     leave = Signal()
     mouse_zoomed = Signal()
 
-    def __init__(self, parent=None, readonly=False, options=None):
+    def __init__(
+        self,
+        parent=None,
+        readonly=False,
+        options=None,
+        line_wrap_mode=None,
+        word_wrap_mode=None,
+    ):
         QtWidgets.QPlainTextEdit.__init__(self, parent)
-        self.ext = PlainTextEditExtension(self, readonly)
-        self.cursor_position = self.ext.cursor_position
+        if line_wrap_mode is None:
+            line_wrap_mode = QtWidgets.QPlainTextEdit.WidgetWidth
+        if word_wrap_mode is None:
+            word_wrap_mode = QtGui.QTextOption.WordWrap
         self.mouse_zoom = True
         self.options = options
         self.menu_actions = []
+        self.line_wrap_mode = line_wrap_mode
+        self.word_wrap_mode = word_wrap_mode
+        self.ext = PlainTextEditExtension(self, readonly)
+        self.cursor_position = self.ext.cursor_position
 
     def get(self):
         """Return the raw Unicode value from Qt"""
@@ -297,6 +314,14 @@ class PlainTextEdit(QtWidgets.QPlainTextEdit):
     def offset_and_selection(self):
         """Return the cursor offset and selected text"""
         return self.ext.offset_and_selection()
+
+    def selected_line_range(self):
+        """Return the start and end lines corresponding to the current selection"""
+        offset, selection = self.offset_and_selection()
+        content = self.get()
+        start_line = content[:offset].count('\n')
+        span = max(1, selection.count('\n'))
+        return start_line + 1, span
 
     def set_value(self, value, block=False):
         self.ext.set_value(value, block=block)
@@ -315,8 +340,8 @@ class PlainTextEdit(QtWidgets.QPlainTextEdit):
             with qtutils.BlockSignals(self.options.enable_word_wrapping):
                 self.options.enable_word_wrapping.setChecked(enabled)
         if enabled:
-            self.setWordWrapMode(QtGui.QTextOption.WordWrap)
-            self.setLineWrapMode(QtWidgets.QPlainTextEdit.WidgetWidth)
+            self.setWordWrapMode(self.word_wrap_mode)
+            self.setLineWrapMode(self.line_wrap_mode)
         else:
             self.setWordWrapMode(QtGui.QTextOption.NoWrap)
             self.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap)
@@ -511,10 +536,10 @@ class TextEdit(QtWidgets.QTextEdit):
 
     def __init__(self, parent=None, readonly=False):
         QtWidgets.QTextEdit.__init__(self, parent)
-        self.ext = TextEditExtension(self, readonly)
-        self.cursor_position = self.ext.cursor_position
         self.expandtab_enabled = False
         self.menu_actions = []
+        self.ext = TextEditExtension(self, readonly)
+        self.cursor_position = self.ext.cursor_position
 
     def get(self):
         """Return the raw Unicode value from Qt"""
@@ -698,8 +723,21 @@ class HintWidget(QtCore.QObject):
 class HintedPlainTextEdit(PlainTextEdit):
     """A hinted plain text edit"""
 
-    def __init__(self, context, hint, parent=None, readonly=False):
-        PlainTextEdit.__init__(self, parent=parent, readonly=readonly)
+    def __init__(
+        self,
+        context,
+        hint,
+        parent=None,
+        readonly=False,
+        line_wrap_mode=None,
+        word_wrap_mode=None,
+    ):
+        super().__init__(
+            readonly=readonly,
+            line_wrap_mode=line_wrap_mode,
+            word_wrap_mode=word_wrap_mode,
+            parent=parent,
+        )
         self.hint = HintWidget(self, hint)
         self.context = context
         self.setFont(qtutils.diff_font(context))
@@ -871,8 +909,18 @@ class VimHintedPlainTextEdit(HintedPlainTextEdit):
     Base = HintedPlainTextEdit
     Mixin = VimMixin
 
-    def __init__(self, context, hint, parent=None):
-        HintedPlainTextEdit.__init__(self, context, hint, parent=parent, readonly=True)
+    def __init__(
+        self, context, hint, line_wrap_mode=None, word_wrap_mode=None, parent=None
+    ):
+        HintedPlainTextEdit.__init__(
+            self,
+            context,
+            hint,
+            parent=parent,
+            readonly=True,
+            line_wrap_mode=line_wrap_mode,
+            word_wrap_mode=word_wrap_mode,
+        )
         self._mixin = self.Mixin(self)
 
     def move(self, direction, select=False, n=1):

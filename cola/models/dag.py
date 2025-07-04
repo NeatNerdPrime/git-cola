@@ -262,13 +262,8 @@ class RepoReader:
     def get(self):
         """Generator function returns Commit objects found by the params"""
         if self._cached:
-            idx = 0
-            while True:
-                try:
-                    yield self._topo_list[idx]
-                except IndexError:
-                    break
-                idx += 1
+            for commit in self._topo_list:
+                yield commit
             return
 
         self.reset()
@@ -277,6 +272,7 @@ class RepoReader:
             self._cmd
             + ['-%d' % self.params.count]
             + ['--date=%s' % prefs.logdate(self.context)]
+            + ['--no-patch']
             + ref_args
         )
         commit = None
@@ -292,7 +288,10 @@ class RepoReader:
                 try:
                     commit = self._objects[oid]
                 except KeyError:
-                    commit = CommitFactory.new(log_entry=log_entry)
+                    try:
+                        commit = CommitFactory.new(log_entry=log_entry)
+                    except (KeyError, ValueError):
+                        continue
                     self._objects[commit.oid] = commit
                     self._topo_list.append(commit)
                 yield commit

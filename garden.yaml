@@ -106,11 +106,22 @@ trees:
         sed -i -e s/0.0.0/${cola_version}/ ${cola_app}/Contents/Info.plist
         cp contrib/darwin/git-cola ${cola_app}/Contents/MacOS
         cp contrib/darwin/git-cola.icns ${cola_app}/Contents/Resources
+        # A stub binary makes macOS launch Python natively instead of via Rosetta.
+        # https://github.com/git-cola/git-cola/issues/1485
+        echo 'int main() { return 0; }' |
+          cc -x c -o ${cola_app}/Contents/MacOS/git-cola-macos -
         garden install ${GARDEN_CMD_VERBOSE} -D prefix=${cola_app_resources}
         garden doc ${GARDEN_CMD_VERBOSE}
         garden install ${GARDEN_CMD_VERBOSE} -D prefix=${cola_app_resources} docs
       man: garden man ${GARDEN_CMD_VERBOSE} docs
       pkg: git make-pkg --global --name git-cola
+      pynsist: |
+        ${activate}
+        rm -fr build/nsis
+        garden html ${GARDEN_CMD_VERBOSE} docs
+        garden install ${GARDEN_CMD_VERBOSE} -D htmldir="${TREE_PATH}/docs/html" docs
+        pynsist pynsist.cfg
+        rm -rf docs/html
       po: |
         for po in cola/i18n/*.po
         do
@@ -152,6 +163,7 @@ trees:
     remotes:
       abid1998: "git@github.com:abid1998/git-cola.git"
       achernet: "git@github.com:achernet/git-cola.git"
+      arnaudh: "git@github.com:arnaudh/git-cola.git"
       axel-h: "git@github.com:axel-h/git-cola.git"
       BaumiCoder: "git@github.com:BaumiCoder/git-cola.git"
       bearsh: "git@github.com:bearsh/git-cola.git"
@@ -265,9 +277,9 @@ trees:
         flathub https://flathub.org/repo/flathub.flatpakrepo
         flatpak install --user \
         org.flatpak.Builder/x86_64 \
-        org.kde.Sdk/x86_64/5.15-23.08 \
-        org.kde.Platform/x86_64/5.15-23.08 \
-        com.riverbankcomputing.PyQt.BaseApp/x86_64/5.15-23.08
+        org.kde.Sdk/x86_64/6.9 \
+        org.kde.Platform/x86_64/6.9 \
+        com.riverbankcomputing.PyQt.BaseApp/x86_64/6.9
     remotes:
       Mailaender: "git@github.com:Mailaender/com.github.git_cola.git-cola.git"
       Erick555: "git@github.com:Erick555/com.github.git_cola.git-cola.git"

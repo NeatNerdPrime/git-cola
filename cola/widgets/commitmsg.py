@@ -10,6 +10,7 @@ from qtpy.QtCore import Signal
 from .. import actions
 from .. import cmds
 from .. import core
+from .. import display
 from .. import gitcmds
 from .. import hotkeys
 from .. import icons
@@ -193,6 +194,25 @@ class CommitMessageEditor(QtWidgets.QFrame):
         self.fixup_commit_menu = self.actions_menu.addMenu(N_('Fixup Previous Commit'))
         self.fixup_commit_menu.aboutToShow.connect(self.build_fixup_menu)
 
+        # Author and Date display.
+        self._author_image = qtutils.pixmap_label(
+            icons.person(), defs.default_icon, parent=self
+        )
+        self._author_label = qtutils.plain_text_label(parent=self)
+        self._date_image = qtutils.pixmap_label(
+            icons.clock(), defs.default_icon, parent=self
+        )
+        self._date_label = qtutils.plain_text_label(parent=self)
+
+        self.bottomlayout = qtutils.hbox(
+            defs.no_margin,
+            defs.spacing,
+            self._author_image,
+            self._author_label,
+            qtutils.STRETCH,
+            self._date_image,
+            self._date_label,
+        )
         self.toplayout = qtutils.hbox(
             defs.no_margin,
             defs.spacing,
@@ -205,7 +225,9 @@ class CommitMessageEditor(QtWidgets.QFrame):
         self.topwidget = QtWidgets.QWidget()
         self.topwidget.setLayout(self.toplayout)
 
-        self.mainlayout = qtutils.vbox(defs.no_margin, defs.spacing, self.description)
+        self.mainlayout = qtutils.vbox(
+            defs.no_margin, defs.spacing, self.description, self.bottomlayout
+        )
         self.setLayout(self.mainlayout)
 
         qtutils.connect_button(self.commit_button, self.commit)
@@ -294,7 +316,6 @@ class CommitMessageEditor(QtWidgets.QFrame):
         If the cursor is at the end of the line then focus the description.
         Otherwise, move the cursor to the end of the line so that a
         subsequence "down" press moves to the end of the line.
-
         """
         self.focus_description()
 
@@ -449,6 +470,42 @@ class CommitMessageEditor(QtWidgets.QFrame):
                 with qtutils.BlockSignals(self.commit_author_action):
                     self.commit_author_action.setChecked(True)
 
+        self.update_author_and_date()
+
+    def update_author_and_date(self):
+        """Hide or display the author field"""
+        amending = self.model.mode == self.model.mode_amend
+        # Display the author when amending or when overridden.
+        if self._git_commit_author:
+            author = self._git_commit_author
+        elif amending:
+            author = self.model.commit_author
+        else:
+            author = ''
+        author_visible = bool(author)
+        if author:
+            self._author_label.setText(author)
+        self._author_image.setVisible(author_visible)
+        self._author_label.setVisible(author_visible)
+
+        # Display the commit date when amending or when overridden.
+        if self._git_commit_date:
+            date = self._git_commit_date
+        elif amending and self._last_commit_datetime:
+            date = display.git_commit_date(self._last_commit_datetime)
+        else:
+            date = ''
+        date_visible = bool(date)
+        if date:
+            self._date_label.setText(date)
+        self._date_image.setVisible(date_visible)
+        self._date_label.setVisible(date_visible)
+
+        if author_visible or date_visible:
+            self.actions_button.setIcon(icons.gear_solid())
+        else:
+            self.actions_button.setIcon(icons.configure())
+
     def commit(self):
         """Attempt to create a commit from the index and commit message."""
         context = self.context
@@ -525,6 +582,7 @@ class CommitMessageEditor(QtWidgets.QFrame):
             date = None
 
         if self.commit_author_action.isChecked():
+            self.commit_author_action.setChecked(False)
             author = self._git_commit_author
         else:
             author = None
@@ -668,6 +726,7 @@ class CommitMessageEditor(QtWidgets.QFrame):
         """Choose the date and time that is used when authoring commits"""
         if not enabled:
             self._git_commit_date = None
+            self.update_author_and_date()
             return
         widget = CommitDateDialog(
             self, self.context, commit_datetime=self._last_commit_datetime
@@ -679,6 +738,7 @@ class CommitMessageEditor(QtWidgets.QFrame):
             self._last_commit_datetime = CommitDateDialog.tick_time(widget.datetime())
         else:
             self.commit_date_action.setChecked(False)
+        self.update_author_and_date()
 
     def set_commit_author(self, enabled):
         """Choose a commit author to override the author value when authoring commits"""
@@ -686,6 +746,7 @@ class CommitMessageEditor(QtWidgets.QFrame):
             if self._git_commit_author:
                 self._last_git_commit_author = self._git_commit_author
             self._git_commit_author = None
+            self.update_author_and_date()
             return
         widget = CommitAuthorDialog(
             self,
@@ -707,6 +768,7 @@ class CommitMessageEditor(QtWidgets.QFrame):
         else:
             self._git_commit_author = None
             self.commit_author_action.setChecked(False)
+        self.update_author_and_date()
 
     # Qt overrides
     def showEvent(self, event):
@@ -859,7 +921,7 @@ class CommitDateDialog(QtWidgets.QDialog):
 
     def commit_date(self):
         """Return the selected datetime as a string for use by Git"""
-        return self.datetime().strftime('%a %b %d %H:%M:%S %Y %z')
+        return display.git_commit_date(self.datetime())
 
     def _update_time_from_slider(self, value):
         """Map the slider value to an offset corresponding to the current time.

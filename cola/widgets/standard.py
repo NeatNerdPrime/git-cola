@@ -819,21 +819,39 @@ class ProgressTickThread(QtCore.QThread):
 
 class SpinBox(QtWidgets.QSpinBox):
     def __init__(
-        self, parent=None, value=None, mini=1, maxi=99999, step=0, prefix='', suffix=''
+        self,
+        parent=None,
+        value=None,
+        mini=1,
+        maxi=99999,
+        step=0,
+        prefix='',
+        suffix='',
+        tooltip='',
+        wrap=False,
     ):
         QtWidgets.QSpinBox.__init__(self, parent)
+        self.setAlignment(Qt.AlignRight)
+        self.setButtonSymbols(QtWidgets.QAbstractSpinBox.PlusMinus)
         self.setPrefix(prefix)
         self.setSuffix(suffix)
         self.setWrapping(True)
         self.setMinimum(mini)
         self.setMaximum(maxi)
+        self.setWrapping(wrap)
         if step:
             self.setSingleStep(step)
         if value is not None:
-            self.setValue(value)
+            self.set_value(value)
         text_width = qtutils.text_width(self.font(), 'MMMMMM')
         width = max(self.minimumWidth(), text_width)
         self.setMinimumWidth(width)
+        if tooltip:
+            self.setToolTip(tooltip)
+
+    def set_value(self, value):
+        """Set the spinbox value directly"""
+        self.setValue(value)
 
 
 class DirectoryPathLineEdit(QtWidgets.QWidget):

@@ -33,9 +33,9 @@ def finder(context, paths=None):
     return widget
 
 
-def new_finder(context, paths=None, parent=None):
+def new_finder(context, paths=None, ref=None, title=None, ok_text='', parent=None):
     """Create a finder widget"""
-    widget = Finder(context, parent=parent)
+    widget = Finder(context, ref=ref, title=title, ok_text=ok_text, parent=parent)
     widget.search_for(paths or '')
     return widget
 
@@ -90,34 +90,57 @@ class FindFilesThread(QtCore.QThread):
         self.query = None
 
     def run(self):
-        context = self.context
         query = self.query
-        if query is None:
-            args = []
-        else:
-            args = [add_wildcards(arg) for arg in utils.shell_split(query)]
-        filenames = gitcmds.tracked_files(context, *args)
+        filenames = self.get_filenames()
         if query == self.query:
             self.result.emit(filenames)
         else:
             self.run()
 
+    def get_filenames(self):
+        """Query filenames from git"""
+        query = self.query
+        if query is None:
+            args = []
+        else:
+            args = [add_wildcards(arg) for arg in utils.shell_split(query)]
+        return gitcmds.tracked_files(self.context, *args)
+
+
+class FindFilesFromRefThread(FindFilesThread):
+    """Gather the filenames that are present in the specified ref"""
+
+    def __init__(self, context, ref, parent):
+        super().__init__(context, parent)
+        self.ref = ref
+
+    def get_filenames(self):
+        """Query the filenames present in the specified ref"""
+        args = utils.shell_split(self.query)
+        return gitcmds.ls_tree_paths(self.context, self.ref, *args)
+
 
 class Finder(standard.Dialog):
     """File Finder dialog"""
 
-    def __init__(self, context, parent=None):
+    def __init__(self, context, ref=None, title=None, ok_text='', parent=None):
         standard.Dialog.__init__(self, parent)
         self.context = context
-        self.setWindowTitle(N_('Find Files'))
+        self.setWindowTitle(title or N_('Find Files'))
         if parent is not None:
             self.setWindowModality(Qt.WindowModal)
-
+        if ref is None:
+            ref = 'HEAD'
+        self.ref = ref
         label = os.path.basename(core.getcwd()) + '/'
         self.input_label = QtWidgets.QLabel(label)
-        self.input_txt = completion.GitTrackedLineEdit(context, hint=N_('<path> ...'))
+        self.input_txt = completion.GitPathsFromRefLineEdit(
+            context, ref, hint=N_('<path> ...')
+        )
 
         self.tree = filetree.FileTree(parent=self)
+        self.browser = text.VimTextBrowser(context, parent=self)
+        self.filename = None
 
         self.edit_button = qtutils.edit_button(default=True)
         self.edit_button.setShortcut(hotkeys.EDIT)
@@ -138,6 +161,10 @@ class Finder(standard.Dialog):
         )
 
         self.close_button = qtutils.close_button()
+        self.ok_button = qtutils.ok_button(ok_text, default=False)
+        self.ok_button.setEnabled(False)
+        if not ok_text:
+            self.ok_button.hide()
 
         self.input_layout = qtutils.hbox(
             defs.no_margin, defs.button_spacing, self.input_label, self.input_txt
@@ -146,31 +173,37 @@ class Finder(standard.Dialog):
         self.bottom_layout = qtutils.hbox(
             defs.no_margin,
             defs.button_spacing,
+            self.close_button,
+            qtutils.STRETCH,
             self.help_button,
             self.refresh_button,
-            qtutils.STRETCH,
-            self.close_button,
             self.open_default_button,
             self.edit_button,
+            self.ok_button,
         )
-
+        self.splitter = qtutils.splitter(Qt.Horizontal, self.tree, self.browser)
         self.main_layout = qtutils.vbox(
             defs.margin,
             defs.no_spacing,
             self.input_layout,
-            self.tree,
+            self.splitter,
             self.bottom_layout,
         )
         self.setLayout(self.main_layout)
         self.setFocusProxy(self.input_txt)
 
-        thread = self.worker_thread = FindFilesThread(context, self)
+        if ref == 'HEAD':
+            thread = FindFilesThread(context, self)
+        else:
+            thread = FindFilesFromRefThread(context, ref, self)
+        self.worker_thread = thread
         thread.result.connect(self.process_result, type=Qt.QueuedConnection)
 
-        self.input_txt.textChanged.connect(lambda s: self.search())
+        self.input_txt.textChanged.connect(lambda _: self.search())
         self.input_txt.activated.connect(self.focus_tree)
         self.input_txt.down.connect(self.focus_tree)
         self.input_txt.enter.connect(self.focus_tree)
+        self.browser.selectionChanged.connect(self.browser_selection_changed)
 
         item_selection_changed = self.tree_item_selection_changed
         self.tree.itemSelectionChanged.connect(item_selection_changed)
@@ -180,6 +213,11 @@ class Finder(standard.Dialog):
         qtutils.add_action(
             self, 'Focus Input', self.focus_input, hotkeys.FOCUS, hotkeys.FINDER
         )
+        self.select_range_action = qtutils.add_action(
+            self, 'Select Line Range', self.accept
+        )
+        if ok_text:
+            self.browser.menu_actions.append(self.select_range_action)
 
         self.show_help_action = qtutils.add_action(
             self, N_('Show Help'), partial(show_help, context), hotkeys.QUESTION
@@ -190,9 +228,25 @@ class Finder(standard.Dialog):
         qtutils.connect_button(self.refresh_button, self.search)
         qtutils.connect_button(self.help_button, partial(show_help, context))
         qtutils.connect_button(self.close_button, self.close)
+        qtutils.connect_button(self.ok_button, self.accept)
         qtutils.add_close_action(self)
 
         self.init_size(parent=parent)
+
+    def export_state(self):
+        """Export persistent settings"""
+        state = super().export_state()
+        state['sizes'] = get(self.splitter)
+        return state
+
+    def apply_state(self, state):
+        """Apply persistent settings"""
+        result = super().apply_state(state)
+        try:
+            self.splitter.setSizes(state['sizes'])
+        except (AttributeError, KeyError, ValueError, TypeError):
+            result = False
+        return result
 
     def focus_tree(self):
         self.tree.setFocus()
@@ -226,5 +280,25 @@ class Finder(standard.Dialog):
         cmds.do(cmds.OpenDefaultApp, context, paths)
 
     def tree_item_selection_changed(self):
-        enabled = bool(self.tree.selected_item())
+        item = self.tree.selected_item()
+        enabled = bool(item)
         self.button_group.setEnabled(enabled)
+
+        filename = None
+        content = ''
+        if item is not None:
+            filename = filetree.filename_from_item(item)
+            if filename:
+                content = gitcmds.cat_file_from_ref(self.context, self.ref, filename)
+        self.filename = filename
+        self.browser.set_value(content)
+
+    def browser_selection_changed(self):
+        _, selection = self.browser.offset_and_selection()
+        enabled = bool(selection)
+        self.ok_button.setEnabled(enabled)
+        self.select_range_action.setEnabled(enabled)
+
+    def selected_line_range(self):
+        """Return the selected line range for the text browser"""
+        return self.browser.selected_line_range()

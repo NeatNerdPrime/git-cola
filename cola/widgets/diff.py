@@ -191,8 +191,9 @@ class DiffTextEdit(VimHintedPlainTextEdit):
     def __init__(
         self, context, parent, is_commit=False, whitespace=True, numbers=False
     ):
-        VimHintedPlainTextEdit.__init__(self, context, '', parent=parent)
+        super().__init__(context, '', parent=parent)
         # Diff/patch syntax highlighter
+        self.max_diff_size = 0
         self.highlighter = DiffSyntaxHighlighter(
             context, self.document(), is_commit=is_commit, whitespace=whitespace
         )
@@ -269,14 +270,11 @@ class DiffTextEdit(VimHintedPlainTextEdit):
             scrollbar.setValue(scrollvalue)
         self.scrollvalue = None
 
-    def set_loading_message(self):
-        """Add a pending loading message in the diff view"""
-        self.hint.set_value('+++ ' + N_('Loading...'))
-        self.set_value('')
-
     def set_diff(self, diff):
-        """Set the diff text, but save the scrollbar"""
+        """Set the diff text and restore the scrollbar position post-update"""
         diff = diff.rstrip('\n')  # diffs include two empty newlines
+        diff = _truncate_diff(diff, self.max_diff_size)
+
         self.save_scrollbar()
 
         lines = self.diff_lines.parse(diff)
@@ -284,7 +282,6 @@ class DiffTextEdit(VimHintedPlainTextEdit):
             # The diff_lines parser is shared with self.numbers and updated above.
             self.numbers.set_diff(diff, lines=lines)
 
-        self.hint.set_value('')
         self.set_value(diff)
         self.restore_scrollbar()
 
@@ -352,6 +349,26 @@ def _strip_diff(value):
     if value.startswith(('+', '-', ' ')):
         return value[1:]
     return value
+
+
+def _truncate_diff(value, size):
+    """Truncate the diff to the specified number of megabytes"""
+    if size == 0:  # Unlimited
+        return value
+
+    # Technically size represents the number of unicode tokens not bytes, but it's good
+    # enough given that usually we're dealing with utf-8 text.
+    count = size * 1024 * 1024
+    if len(value) <= count:
+        return value
+
+    # Find the last newline starting from size so that the last line is a full, complete
+    # line rather than an invalid truncated invalid diff value.
+    newline = value.rfind('\n', 0, count)
+    if newline == -1:
+        return value[:count]
+
+    return value[:newline]
 
 
 class DiffLineNumbers(TextDecorator):
@@ -545,6 +562,10 @@ class Viewer(QtWidgets.QFrame):
 
         # Observe the diff text
         model.diff_text_updated.connect(self.set_diff, type=Qt.QueuedConnection)
+        # Observe the diff loading state
+        self.context.notifier.listen(
+            cmds.Messages.DIFF_LOADING, self.set_loading_message
+        )
 
         # Observe the image mode combo box
         options.image_mode.currentIndexChanged.connect(lambda _: self.render())
@@ -556,6 +577,11 @@ class Viewer(QtWidgets.QFrame):
             self.show_search_diff,
             hotkeys.SEARCH,
         )
+
+    def set_loading_message(self):
+        """Display an indicator that a diff is loading in the background"""
+        # The diffstat will be replaced with the real diffstat on load.
+        self.diffstat.set_text(N_('Loading...'))
 
     def dragEnterEvent(self, event):
         """Accepts drops if the mimedata contains patches"""
@@ -604,6 +630,7 @@ class Viewer(QtWidgets.QFrame):
         state['image_diff_mode'] = self.options.image_mode.currentIndex()
         state['image_zoom_mode'] = self.options.zoom_mode.currentIndex()
         state['word_wrap'] = self.options.enable_word_wrapping.isChecked()
+        state['max_diff_size'] = self.options.max_diff_spinbox.value()
         return state
 
     def apply_state(self, state):
@@ -621,6 +648,10 @@ class Viewer(QtWidgets.QFrame):
 
         word_wrap = bool(state.get('word_wrap', True))
         self.set_word_wrapping(word_wrap, update=True)
+
+        max_diff_size = state.get('max_diff_size', 1)
+        self.text.max_diff_size = max_diff_size
+        self.options.max_diff_spinbox.set_value(max_diff_size)
         return True
 
     def set_diff(self, diff):
@@ -836,6 +867,29 @@ class Options(QtWidgets.QWidget):
         self.enable_word_wrapping = qtutils.add_action_bool(
             self, N_('Enable word wrapping'), self.set_word_wrapping, True
         )
+        self.max_diff_label = QtWidgets.QLabel(
+            N_('Maximum diff size in megabytes (MB)'), self
+        )
+        self.max_diff_spinbox = standard.SpinBox(
+            value=1,
+            mini=0,
+            maxi=9999,
+            suffix='\tMB',
+            tooltip=N_('The maximum diff size in megabytes (MB)'),
+            parent=self,
+        )
+        self.max_diff_spinbox.setSpecialValueText(N_('Unlimited'))
+        self.max_diff_widget = QtWidgets.QWidget(self)
+        self.max_diff_layout = qtutils.hbox(
+            defs.no_margin,
+            defs.button_spacing,
+            self.max_diff_label,
+            qtutils.STRETCH,
+            self.max_diff_spinbox,
+        )
+        self.max_diff_widget.setLayout(self.max_diff_layout)
+        self.max_diff_action = QtWidgets.QWidgetAction(self)
+        self.max_diff_action.setDefaultWidget(self.max_diff_widget)
 
         self.options = qtutils.create_toolbutton(
             tooltip=N_('Diff Options'), icon=icons.configure()
@@ -864,6 +918,8 @@ class Options(QtWidgets.QWidget):
 
         self.menu = menu = qtutils.create_menu(N_('Diff Options'), self.options)
         self.options.setMenu(menu)
+        menu.addAction(self.max_diff_action)
+        menu.addSeparator()
         menu.addAction(self.ignore_space_at_eol)
         menu.addAction(self.ignore_space_change)
         menu.addAction(self.ignore_all_space)
@@ -935,7 +991,7 @@ class Options(QtWidgets.QWidget):
         self.widget.set_word_wrapping(value, update=False)
 
     def hide_advanced_options(self):
-        """Hide advanced options that are not applicable to the DiffWidget"""
+        """Hide advanced options that are not applicable to the CommitDiffWidget"""
         self.show_filenames.setVisible(False)
         self.show_line_numbers.setVisible(False)
         self.ignore_space_at_eol.setVisible(False)
@@ -1004,6 +1060,11 @@ class DiffEditor(DiffTextEdit):
         self.cursorPositionChanged.connect(self._update_line_number)
 
         qtutils.connect_button(options.toggle_image_diff, self.toggle_diff_type)
+        self.options.max_diff_spinbox.valueChanged.connect(self.set_max_diff_size)
+
+    def set_max_diff_size(self, value):
+        """Set the max diff state on the diff widget"""
+        self.max_diff_size = value
 
     def toggle_diff_type(self):
         cmds.do(cmds.ToggleDiffType, self.context)
@@ -1551,7 +1612,7 @@ class AuthorLabel(PlainTextLabel):
         super().context_menu_actions(menu)
 
 
-class DiffWidget(QtWidgets.QWidget):
+class CommitDiffWidget(QtWidgets.QWidget):
     """Display commit metadata and text diffs"""
 
     def __init__(self, context, parent, is_commit=False, options=None):
@@ -1619,7 +1680,7 @@ class DiffWidget(QtWidgets.QWidget):
     def start_diff_task(self, task):
         """Clear the display and start a diff-gathering task"""
         self.diff.save_scrollbar()
-        self.diff.set_loading_message()
+        cmds.do(cmds.DiffLoading, self.context)
         self.context.runtask.start(task, result=self.set_diff)
 
     def set_diff_oid(self, oid, filename=None):
@@ -1824,7 +1885,7 @@ class ApplyPatches(standard.Dialog):
         self.tree.setHeaderHidden(True)
         self.tree.itemSelectionChanged.connect(self._tree_selection_changed)
 
-        self.diffwidget = DiffWidget(context, self, is_commit=True)
+        self.diffwidget = CommitDiffWidget(context, self, is_commit=True)
 
         self.add_button = qtutils.create_toolbutton(
             text=N_('Add'), icon=icons.add(), tooltip=N_('Add patches (+)')

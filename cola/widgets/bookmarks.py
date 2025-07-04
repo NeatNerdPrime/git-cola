@@ -183,6 +183,12 @@ class BookmarksWidget(QtWidgets.QFrame):
 
         self.quick_switcher.filter_input.keyPressEvent(event)
 
+    # Qt overrides
+    def setFont(self, font):
+        """Forward setFont() to child widgets"""
+        super().setFont(font)
+        self.tree.setFont(font)
+
 
 def disable_rename(_path, _name, _new_name):
     return False
@@ -503,6 +509,7 @@ class BookmarksTreeView(standard.TreeView):
             settings.remove_missing_bookmarks()
         elif self.style == RECENT_REPOS:
             settings.remove_missing_recent()
+        settings.save()
         self.refresh()
 
 

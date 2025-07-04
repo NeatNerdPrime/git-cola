@@ -28,13 +28,13 @@ def add(context, items, u=False):
 def apply_diff(context, filename):
     """Use "git apply" to apply the patch in `filename` to the staging area"""
     git = context.git
-    return git.apply(filename, index=True, cached=True)
+    return git.apply(filename, index=True, cached=True, recount=True)
 
 
 def apply_diff_to_worktree(context, filename):
     """Use "git apply" to apply the patch in `filename` to the worktree"""
     git = context.git
-    return git.apply(filename)
+    return git.apply(filename, recount=True)
 
 
 def get_branch(context, branch):
@@ -826,6 +826,19 @@ def ls_tree(context, path, ref='HEAD'):
     return result
 
 
+def ls_tree_paths(context, ref, *args):
+    """Gather a list of file paths as they existed at the specified ref"""
+    status, out, _ = context.git.ls_tree(
+        ref, '--', *args, r=True, name_only=True, z=True, _readonly=True
+    )
+    out = out.rstrip('\0')
+    if status == 0 and out:
+        paths = out.split('\0')
+    else:
+        paths = []
+    return paths
+
+
 # A regex for matching the output of git(log|rev-list) --pretty=oneline
 REV_LIST_REGEX = re.compile(r'^([0-9a-f]{40}) (.*)$')
 
@@ -988,6 +1001,25 @@ def prev_commitmsg(context, *args):
     )[STDOUT]
 
 
+def prev_author_and_commitmsg(context, *args):
+    """Queries git for the latest commit message."""
+    git = context.git
+    output = git.log(
+        '-1',
+        no_color=True,
+        pretty='format:%an <%ae>####%s%n%n%b',
+        _readonly=True,
+        *args,
+    )[STDOUT]
+    try:
+        author, commitmsg = output.split('####', 1)
+    except ValueError:
+        author = ''
+        commitmsg = ''
+
+    return author, commitmsg
+
+
 def rev_parse(context, name):
     """Call git rev-parse and return the output"""
     git = context.git
@@ -1040,6 +1072,14 @@ def cat_file(context, filename, *args, **kwargs):
     if not result:
         core.unlink(path)
     return result
+
+
+def cat_file_from_ref(context, ref, filename):
+    """Read file contents using git cat-file"""
+    status, out, _ = context.git.cat_file(
+        'blob', f'{ref}:{filename}', _raw=True, _readonly=True
+    )
+    return out
 
 
 def write_blob_path(context, head, oid, filename):

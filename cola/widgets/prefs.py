@@ -262,9 +262,6 @@ scissors
 class SettingsFormWidget(FormWidget):
     def __init__(self, context, model, parent):
         FormWidget.__init__(self, context, model, parent)
-
-        self.fixed_font = QtWidgets.QFontComboBox()
-        self.font_size = standard.SpinBox(value=12, mini=6, maxi=192)
         self.maxrecent = standard.SpinBox(maxi=99)
         self.tabwidth = standard.SpinBox(maxi=42)
         self.textwidth = standard.SpinBox(maxi=150)
@@ -301,8 +298,6 @@ class SettingsFormWidget(FormWidget):
         tooltip = N_('Emit notifications when commits are pushed.')
         self.notifyonpush = qtutils.checkbox(checked=False, tooltip=tooltip)
 
-        self.add_row(N_('Fixed-Width Font'), self.fixed_font)
-        self.add_row(N_('Font Size'), self.font_size)
         self.add_row(N_('Text Width'), self.textwidth)
         self.add_row(N_('Tab Width'), self.tabwidth)
         self.add_row(N_('Editor'), self.editor)
@@ -371,34 +366,21 @@ class SettingsFormWidget(FormWidget):
             prefs.NOTIFY_ON_PUSH: (self.notifyonpush, Defaults.notifyonpush),
         })
 
-        self.fixed_font.currentFontChanged.connect(self.current_font_changed)
-        self.font_size.valueChanged.connect(self.font_size_changed)
-
-    def update_from_config(self):
-        """Update widgets to the current config values"""
-        FormWidget.update_from_config(self)
-        context = self.context
-
-        with qtutils.BlockSignals(self.fixed_font):
-            font = qtutils.diff_font(context)
-            self.fixed_font.setCurrentFont(font)
-
-        with qtutils.BlockSignals(self.font_size):
-            font_size = font.pointSize()
-            self.font_size.setValue(font_size)
-
-    def font_size_changed(self, size):
-        font = self.fixed_font.currentFont()
-        font.setPointSize(size)
-        cmds.do(prefs.SetConfig, self.model, 'global', prefs.FONTDIFF, font.toString())
-
-    def current_font_changed(self, font):
-        cmds.do(prefs.SetConfig, self.model, 'global', prefs.FONTDIFF, font.toString())
-
 
 class AppearanceFormWidget(FormWidget):
     def __init__(self, context, model, parent):
         FormWidget.__init__(self, context, model, parent)
+        # Fonts
+        font = self.font()
+        font_size = context.cfg.get(prefs.FONTSIZE, font.pointSize())
+        self.default_font_size = font_size
+        self.fixed_font = QtWidgets.QFontComboBox()
+        self.fixed_font_size = standard.SpinBox(value=12, mini=6, maxi=192)
+        self.fixed_font_size.setToolTip(
+            N_('The font size for the fixed-width diff font')
+        )
+        self.font_size = standard.SpinBox(value=font_size, mini=6, maxi=192)
+        self.font_size.setToolTip(N_('The font size for the main UI elements'))
         # Theme selectors
         self.themes = themes.get_all_themes()
         self.theme = qtutils.combo_mapped(themes.options(themes=self.themes))
@@ -414,6 +396,9 @@ class AppearanceFormWidget(FormWidget):
         self.status_indent = qtutils.checkbox()
         self.block_cursor = qtutils.checkbox(checked=True)
 
+        self.add_row(N_('Fixed-Width Font'), self.fixed_font)
+        self.add_row(N_('Font Size'), self.fixed_font_size)
+        self.add_row(N_('Font Size (UI)'), self.font_size)
         self.add_row(N_('GUI theme'), self.theme)
         self.add_row(N_('Icon theme'), self.icon_theme)
         self.add_row(N_('High DPI'), self.high_dpi)
@@ -424,6 +409,10 @@ class AppearanceFormWidget(FormWidget):
 
         self.set_config({
             prefs.BOLD_HEADERS: (self.bold_headers, Defaults.bold_headers),
+            prefs.FONTSIZE: (
+                self.font_size,
+                self.default_font_size,
+            ),
             prefs.HIDPI: (self.high_dpi, Defaults.hidpi),
             prefs.STATUS_SHOW_TOTALS: (
                 self.status_show_totals,
@@ -435,6 +424,9 @@ class AppearanceFormWidget(FormWidget):
             prefs.BLOCK_CURSOR: (self.block_cursor, Defaults.block_cursor),
         })
 
+        self.fixed_font.currentFontChanged.connect(self.current_font_changed)
+        self.fixed_font_size.valueChanged.connect(self.diff_font_size_changed)
+        self.font_size.valueChanged.connect(self.font_size_changed)
         self.theme.currentIndexChanged.connect(self._theme_changed)
 
     def _theme_changed(self, theme_idx):
@@ -454,6 +446,32 @@ class AppearanceFormWidget(FormWidget):
         elif not theme.is_dark:
             if icon_theme in ('default', 'dark'):
                 self.icon_theme.set_value('light')
+
+    def update_from_config(self):
+        """Update widgets to the current config values"""
+        FormWidget.update_from_config(self)
+        context = self.context
+
+        with qtutils.BlockSignals(self.fixed_font):
+            font = qtutils.diff_font(context)
+            self.fixed_font.setCurrentFont(font)
+
+        with qtutils.BlockSignals(self.fixed_font_size):
+            font_size = font.pointSize()
+            self.fixed_font_size.setValue(font_size)
+
+    def diff_font_size_changed(self, size):
+        """The diff font size was changed"""
+        font = self.fixed_font.currentFont()
+        font.setPointSize(size)
+        cmds.do(prefs.SetConfig, self.model, 'global', prefs.FONTDIFF, font.toString())
+
+    def font_size_changed(self, size):
+        """The UI font size was changed"""
+        cmds.do(prefs.SetConfig, self.model, 'global', prefs.FONTSIZE, size)
+
+    def current_font_changed(self, font):
+        cmds.do(prefs.SetConfig, self.model, 'global', prefs.FONTDIFF, font.toString())
 
 
 class AppearanceWidget(QtWidgets.QWidget):

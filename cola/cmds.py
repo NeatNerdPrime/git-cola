@@ -36,12 +36,18 @@ class UsageError(Exception):
         self.msg = message
 
 
+class Messages:
+    """Notification messages emitted by these commands"""
+
+    DIFF_LOADING = object()
+
+
 class EditModel(ContextCommand):
     """Commands that mutate the main model diff data"""
 
     UNDOABLE = True
 
-    def __init__(self, context):
+    def __init__(self, context, finalizer=None):
         """Common edit operations on the main model"""
         super().__init__(context)
 
@@ -56,22 +62,33 @@ class EditModel(ContextCommand):
         self.new_mode = self.old_mode
         self.new_diff_type = self.old_diff_type
         self.new_file_type = self.old_file_type
+        self.finalizer = finalizer
 
     def do(self):
         """Perform the operation."""
+        if not super().do():
+            return
         self.model.filename = self.new_filename
         self.model.set_mode(self.new_mode)
         self.model.set_diff_text(self.new_diff_text)
         self.model.set_diff_type(self.new_diff_type)
         self.model.set_file_type(self.new_file_type)
+        if self.finalizer is not None:
+            # Finalizers inherit our timestamp so that they fire when we fire.
+            self.finalizer.timestamp = self.timestamp
+            self.context.command_bus.do(self.finalizer)
 
     def undo(self):
         """Undo the operation."""
+        if not super().undo():
+            return
         self.model.filename = self.old_filename
         self.model.set_mode(self.old_mode)
         self.model.set_diff_text(self.old_diff_text)
         self.model.set_diff_type(self.old_diff_type)
         self.model.set_file_type(self.old_file_type)
+        if self.finalizer is not None:
+            self.context.command_bus.undo(self.finalizer)
 
 
 class ConfirmAction(ContextCommand):
@@ -222,15 +239,19 @@ class AmendMode(EditModel):
         super().__init__(context)
         self.skip = False
         self.amending = amend
+        self.old_commit_author = self.model.commit_author
         self.old_commitmsg = self.model.commitmsg
         self.old_mode = self.model.mode
 
         if self.amending:
+            author, commitmsg = gitcmds.prev_author_and_commitmsg(context)
+            self.new_author = author
+            self.new_commitmsg = commitmsg
             self.new_mode = self.model.mode_amend
-            self.new_commitmsg = gitcmds.prev_commitmsg(context)
             AmendMode.LAST_MESSAGE = self.model.commitmsg
             return
         # else, amend unchecked, regular commit
+        self.new_author = ''
         self.new_mode = self.model.mode_none
         self.new_diff_text = ''
         self.new_commitmsg = self.model.commitmsg
@@ -258,6 +279,7 @@ class AmendMode(EditModel):
                 return
         self.skip = False
         super().do()
+        self.model.set_commit_author(self.new_author)
         self.model.set_commitmsg(self.new_commitmsg)
         self.model.update_file_status()
         self.context.selection.reset(emit=True)
@@ -265,6 +287,7 @@ class AmendMode(EditModel):
     def undo(self):
         if self.skip:
             return
+        self.model.set_commit_author(self.old_commit_author)
         self.model.set_commitmsg(self.old_commitmsg)
         super().undo()
         self.model.update_file_status()
@@ -1259,13 +1282,29 @@ class DiffAgainstCommitMode(ContextCommand):
         self.model.update_file_status()
 
 
-class DiffText(EditModel):
+class DiffText(ContextCommand):
     """Set the diff type to text"""
 
     def __init__(self, context):
         super().__init__(context)
         self.new_file_type = main.Types.TEXT
         self.new_diff_type = main.Types.TEXT
+        self.old_file_type = self.model.file_type
+        self.old_diff_type = self.model.diff_type
+
+    def do(self):
+        """Update the diff and file type"""
+        if not super().do():
+            return
+        self.model.set_diff_type(self.new_diff_type)
+        self.model.set_file_type(self.new_file_type)
+
+    def undo(self):
+        """Revert the updating of diff and file types"""
+        if not super().undo():
+            return
+        self.model.set_diff_type(self.old_diff_type)
+        self.model.set_file_type(self.old_file_type)
 
 
 class ToggleDiffType(ContextCommand):
@@ -1481,11 +1520,19 @@ class DiffImage(EditModel):
         return images
 
 
+class DiffLoading(ContextCommand):
+    """Notify the diff viewer the a diff is loading"""
+
+    def do(self):
+        self.context.notifier.notify(Messages.DIFF_LOADING)
+
+
 class Diff(EditModel):
     """Perform a diff and set the model's current text."""
 
-    def __init__(self, context, filename, cached=False, deleted=False):
-        super().__init__(context)
+    def __init__(self, context, filename, cached=False, deleted=False, finalizer=None):
+        DiffLoading(context).do()
+        super().__init__(context, finalizer=finalizer)
         opts = {}
         if cached and gitcmds.is_valid_ref(context, self.model.head):
             opts['ref'] = self.model.head
@@ -1500,6 +1547,7 @@ class Diffstat(EditModel):
     """Perform a diffstat and set the model's diff text."""
 
     def __init__(self, context):
+        DiffLoading(context).do()
         super().__init__(context)
         cfg = self.cfg
         diff_context = cfg.get('diff.context', 3)
@@ -1520,13 +1568,16 @@ class Diffstat(EditModel):
 class DiffStaged(Diff):
     """Perform a staged diff on a file."""
 
-    def __init__(self, context, filename, deleted=None):
-        super().__init__(context, filename, cached=True, deleted=deleted)
+    def __init__(self, context, filename, deleted=None, finalizer=None):
+        super().__init__(
+            context, filename, cached=True, deleted=deleted, finalizer=finalizer
+        )
         self.new_mode = self.model.mode_index
 
 
 class DiffStagedSummary(EditModel):
     def __init__(self, context):
+        DiffLoading(context).do()
         super().__init__(context)
         diff = self.git.diff(
             self.model.head,
@@ -1588,11 +1639,15 @@ class Edit(ContextCommand):
                 '*textpad*': [f'{filename}({self.line_number},0)'],
                 '*notepad++*': ['-n%s' % self.line_number, filename],
                 '*subl*': [f'{filename}:{self.line_number}'],
+                'code': [f'--goto {filename}:{self.line_number}'],
+                'cursor': [f'--goto {filename}:{self.line_number}'],
             }
 
             use_line_numbers = False
             for pattern, opts in editor_opts.items():
-                if fnmatch(editor, pattern):
+                if fnmatch(editor, pattern) or fnmatch(
+                    os.path.basename(editor), pattern
+                ):
                     args.extend(opts)
                     use_line_numbers = True
                     break
@@ -1824,6 +1879,18 @@ class Merge(ContextCommand):
         return status, out, err
 
 
+class MergeBranch(Merge):
+    """Merge a branch with default settings applied"""
+
+    def __init__(self, context, branch):
+        values = context.settings.get('merge')
+        no_commit = not values.get('commit', True)
+        squash = values.get('squash', False)
+        no_ff = values.get('no-ff', False)
+        sign = values.get('sign', False)
+        super().__init__(context, branch, no_commit, squash, no_ff, sign)
+
+
 class OpenDefaultApp(ContextCommand):
     """Open a file using the OS default."""
 
@@ -1997,6 +2064,16 @@ class NewBareRepo(ContextCommand):
             N_('Error'), 'git init --bare --shared "%s"' % path, status, out, err
         )
         return status == 0
+
+
+class NoOp(ContextCommand):
+    """A command that does nothing"""
+
+    def __init__(self, context, *args, **kwargs):
+        super().__init__(context)
+
+    def do(self):
+        pass
 
 
 def unix_path(path, is_win32=utils.is_win32):
@@ -2463,8 +2540,8 @@ def format_hex(data):
 class ShowUntracked(EditModel):
     """Show an untracked file."""
 
-    def __init__(self, context, filename):
-        super().__init__(context)
+    def __init__(self, context, filename, finalizer=None):
+        super().__init__(context, finalizer=finalizer)
         self.new_filename = filename
         if gitcmds.is_binary(context, filename):
             self.new_mode = self.model.mode_untracked

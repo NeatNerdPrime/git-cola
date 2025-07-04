@@ -1,10 +1,63 @@
 Upcoming
 ========
 
+Usability, bells and whistles
+-----------------------------
+* Large diffs are now truncated to one megabyte by default for performance.
+  The diff size limit can be changed in the diff editor's options menu.
+  (`#1484 <https://github.com/git-cola/git-cola/issues/1484>`_)
+
+* Renamed files are now detected when diffing commits using the DAG viewer's
+  "Diff selected to this..." and "Diff this to selected..." actions.
+  (`#1476 <https://github.com/git-cola/git-cola/issues/1476>`_)
+
+* The DAG viewer now accepts ``-L`` arguments just like ``git log``.
+
+* The DAG viewer can generate ``-L`` search expressions using its new
+  "Trace Evolution of Line Range..." context menu action.
+  (`#1483 <https://github.com/git-cola/git-cola/issues/1483>`_)
+
+* A new ``git cola open`` sub-command can be used to launch the "Quick Open"
+  dialog for opening bookmarked and recently-opened repositories.
+  (`#1482 <https://github.com/git-cola/git-cola/issues/1482>`_)
+
+* `code` (VSCode) and `cursor` are now supported for opening files at specific lines.
+  (`#1487 <https://github.com/git-cola/git-cola/pull/1487>`_)
+
+* The Stash tool now ensures that other stashes are displayed when
+  dropping stashes.
+  (`#1491 <https://github.com/git-cola/git-cola/issues/1491>`_)
+
+* The "Merge into current branch" action in the Branches tool now uses
+  ``git merge`` options as configured in the "Merge" dialog.
+  (`#1473 <https://github.com/git-cola/git-cola/issues/1473>`_)
+
+* The font size for the main UI elements can now be configured
+  in the Preferences.
+  (`#1474 <https://github.com/git-cola/git-cola/issues/1474>`_)
+
+* The commit message editor now displays a visual indicator when
+  amending a commit or when the Author and/or Commit Date has been overridden.
+  (`#1490 <https://github.com/git-cola/git-cola/issues/1490>`_)
+
+Fixes
+-----
+* The "Set Upstream Branch" action in the Branches tool was fixed so that it
+  is robust to scenarios where the upstream branch is renamed.
+  (`#1475 <https://github.com/git-cola/git-cola/issues/1475>`_)
+
+* The "Prune Missing Entries" action in the startup dialog and the Bookmarks and Recent
+  tools now save the settings after pruning.
+  (`#1479 <https://github.com/git-cola/git-cola/issues/1479>`_)
+
 Translations
 ------------
 * New Tamil translation.
   (`#1478 <https://github.com/git-cola/git-cola/pull/1478>`_)
+
+Packaging and Dependencies
+--------------------------
+* The Windows installer now uses Python 3.12 and PyQt 6.9.
 
 
 .. _v4.13.0:

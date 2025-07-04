@@ -118,6 +118,12 @@ class BranchesWidget(QtWidgets.QFrame):
         icon = self.order_icon(self.model.ref_sort)
         self.sort_order_button.setIcon(icon)
 
+    # Qt overrides
+    def setFont(self, font):
+        """Forward setFont() to child widgets"""
+        super().setFont(font)
+        self.tree.setFont(font)
+
 
 class BranchesTreeWidget(standard.TreeWidget):
     """A tree widget for displaying branches"""
@@ -491,7 +497,7 @@ class BranchesTreeWidget(standard.TreeWidget):
         """Merge the selected branch into the current branch"""
         branch = self.selected_refname()
         if branch and branch != self.current_branch:
-            self.git_action_async('merge', [branch], update_status=True)
+            self.context.runtask.run(cmds.run(cmds.MergeBranch, self.context, branch))
 
     def checkout_action(self):
         """Checkout the selected branch"""
@@ -830,8 +836,6 @@ def _set_upstream_branch(context, branch, upstream_branch, parent):
     if dialog.exec_() != QtWidgets.QDialog.Accepted:
         return
     new_upstream_branch = dialog.value()
-    if new_upstream_branch == upstream_branch:
-        return
     remote, remote_branch = gitcmds.parse_remote_branch(new_upstream_branch)
     if branch and remote and remote_branch:
         cmds.do(cmds.SetUpstreamBranch, context, branch, remote, remote_branch)
@@ -893,6 +897,7 @@ class SelectRemoteBranch(standard.Dialog):
         )
         self.close_action = qtutils.add_close_action(self)
         qtutils.connect_button(self.close_button, self.close_action.trigger)
+        qtutils.connect_button(self.ok_button, self.accept)
         self.remote_branch.textChanged.connect(self._remote_branch_changed)
         # The "pre" callback uses a direct connection so that it can observe
         # state before the completion popup has been closed. The "post" callback uses a

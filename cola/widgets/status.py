@@ -124,6 +124,12 @@ class StatusWidget(QtWidgets.QFrame):
     def select_header(self):
         self.tree.select_header()
 
+    # Qt overrides
+    def setFont(self, font):
+        """Forward setFont() to child widgets"""
+        super().setFont(font)
+        self.tree.setFont(font)
+
 
 class StatusTreeWidget(QtWidgets.QTreeWidget):
     # Read-only access to the mode state
@@ -1100,6 +1106,7 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
     def show_selection(self):
         """Show the selected item."""
         context = self.context
+        runtask = self.context.runtask
         qtutils.scroll_to_item(self, self.currentItem())
         # Sync the selection model
         selected = self.selection()
@@ -1125,7 +1132,7 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
                 UNMERGED_IDX: cmds.UnmergedSummary,
                 UNTRACKED_IDX: cmds.UntrackedSummary,
             }.get(idx, cmds.Diffstat)
-            cmds.do(cls, context)
+            runtask.run(cmds.run(cls, context))
             return
 
         staged = category == STAGED_IDX
@@ -1147,24 +1154,12 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
 
         path = item.path
         deleted = item.deleted
-        image = self.image_formats.ok(path)
-
-        # Update the diff text
-        if staged:
-            cmds.do(cmds.DiffStaged, context, path, deleted=deleted)
-        elif modified:
-            cmds.do(cmds.Diff, context, path, deleted=deleted)
-        elif unmerged:
-            cmds.do(cmds.Diff, context, path)
-        elif untracked:
-            cmds.do(cmds.ShowUntracked, context, path)
-
         # Images are diffed differently.
         # DiffImage transitions the diff mode to image.
         # DiffText transitions the diff mode to text.
+        image = self.image_formats.ok(path)
         if image:
-            cmds.do(
-                cmds.DiffImage,
+            finalizer = cmds.DiffImage(
                 context,
                 path,
                 deleted,
@@ -1174,7 +1169,25 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
                 untracked,
             )
         else:
-            cmds.do(cmds.DiffText, context)
+            finalizer = cmds.DiffText(context)
+
+        # Update the diff text
+        if staged:
+            runtask.run(
+                cmds.run(
+                    cmds.DiffStaged, context, path, deleted=deleted, finalizer=finalizer
+                )
+            )
+        elif modified:
+            runtask.run(
+                cmds.run(cmds.Diff, context, path, deleted=deleted, finalizer=finalizer)
+            )
+        elif unmerged:
+            runtask.run(cmds.run(cmds.Diff, context, path, finalizer=finalizer))
+        elif untracked:
+            runtask.run(
+                cmds.run(cmds.ShowUntracked, context, path, finalizer=finalizer)
+            )
 
     def select_header(self):
         """Select an active header, which triggers a diffstat"""
@@ -1641,15 +1654,10 @@ class CopyLeadingPathWidget(QtWidgets.QWidget):
     def __init__(self, title, context, parent):
         QtWidgets.QWidget.__init__(self, parent)
         self.context = context
-        self.icon = QtWidgets.QLabel(self)
-        self.label = QtWidgets.QLabel(self)
+        self.icon = qtutils.pixmap_label(icons.copy(), defs.default_icon, parent=self)
+        self.label = qtutils.label(text=title, selectable=False)
         self.spinbox = standard.SpinBox(value=1, mini=1, maxi=99, parent=self)
         self.spinbox.setToolTip(N_('The number of leading paths to strip'))
-
-        icon = icons.copy()
-        pixmap = icon.pixmap(defs.default_icon, defs.default_icon)
-        self.icon.setPixmap(pixmap)
-        self.label.setText(title)
 
         layout = qtutils.hbox(
             defs.small_margin,

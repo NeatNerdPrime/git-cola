@@ -206,9 +206,9 @@ def splitter(orientation, *widgets):
     return layout
 
 
-def label(text=None, align=None, fmt=None, selectable=True):
+def label(text=None, align=None, fmt=None, selectable=True, parent=None):
     """Create a QLabel with the specified properties"""
-    widget = QtWidgets.QLabel()
+    widget = QtWidgets.QLabel(parent)
     if align is not None:
         widget.setAlignment(align)
     if fmt is not None:
@@ -218,6 +218,23 @@ def label(text=None, align=None, fmt=None, selectable=True):
         widget.setOpenExternalLinks(True)
     if text:
         widget.setText(text)
+    return widget
+
+
+def plain_text_label(text=None, align=None, selectable=True, parent=None):
+    """Create a QLabel that display plain text"""
+    return label(
+        text=text, align=align, fmt=Qt.PlainText, selectable=selectable, parent=parent
+    )
+
+
+def pixmap_label(icon, width, height=None, parent=None):
+    """Create a QLabel that displays a pixmap"""
+    if height is None:
+        height = width
+    widget = QtWidgets.QLabel(parent)
+    pixmap = icon.pixmap(width, height)
+    widget.setPixmap(pixmap)
     return widget
 
 
@@ -1169,6 +1186,11 @@ class RunTask(QtCore.QObject):
     def wait(self):
         """Wait until all tasks have finished processing"""
         self.threadpool.waitForDone()
+
+    def run(self, fn, *args, **kwargs):
+        """Run a task in the background"""
+        task = SimpleTask(fn, *args, **kwargs)
+        self.start(task)
 
 
 # Syntax highlighting
