@@ -140,7 +140,7 @@ class GravatarLabel(QtWidgets.QLabel):
         # If the email has not changed (e.g. no other requests)
         # then we know that this pixmap corresponds to this specific
         # email address.  We can't blindly trust self.email else
-        # we may add cache entries for thee wrong email address.
+        # we may add cache entries for the wrong email address.
         url = Gravatar.url_for_email(email, self.imgsize)
         if url == reply.url().toString():
             self.pixmaps[email] = pixmap
