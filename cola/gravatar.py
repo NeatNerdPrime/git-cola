@@ -66,7 +66,7 @@ class GravatarLabel(QtWidgets.QLabel):
 
         self.context = context
         self.email: str | None = None
-        self.response = None
+        self.response: bytes | None = None
         self.timeout = 0
         self.imgsize = defs.medium_icon
         self.pixmaps = {}
