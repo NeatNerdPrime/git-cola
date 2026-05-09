@@ -11,6 +11,7 @@ try:
 except ImportError:
     TypeAlias = Union
 
+import qtpy
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
@@ -1635,3 +1636,19 @@ def qt_span_from_codepoint(
     start_qt = qt_index_from_codepoint(s, start_codepoint)
     end_qt = qt_index_from_codepoint(s, end_codepoint)
     return (start_qt, max(0, end_qt - start_qt))
+
+
+def network_reply_header(reply, header):
+    """Paper over differences in semantics across Qt versions for QNetworkReply.rawHeader()"""
+    # PySide2, PyQt5, PyQt6/6.5 and PySide6/6.5 only accept bytes.
+    # PyQt6/6.9 accepts bytes and str.
+    # PySide6/6.9 only accepts str.
+    if qtpy.PYSIDE6:
+        try:
+            location_header = reply.rawHeader(header)
+        except TypeError:
+            location_header = reply.rawHeader(core.encode(header))
+    else:
+        location_header = reply.rawHeader(core.encode(header))
+
+    return core.decode(bytes(location_header)).strip()
