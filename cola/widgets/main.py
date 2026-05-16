@@ -60,7 +60,6 @@ class MainView(standard.MainWindow):
 
     def __init__(self, context, parent=None):
         standard.MainWindow.__init__(self, parent)
-        self.setAttribute(Qt.WA_DeleteOnClose)
 
         self.context = context
         self.git = context.git
@@ -981,6 +980,8 @@ class MainView(standard.MainWindow):
         for browser in list(self.context.browser_windows):
             browser.close()
         standard.MainWindow.closeEvent(self, event)
+        if self.dag is not None and self.dag.isVisible():
+            self.context.reset_view(self.dag)
 
     def create_view_menu(self):
         menu = qtutils.create_menu(N_('View'), self)

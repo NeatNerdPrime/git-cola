@@ -766,6 +766,14 @@ class ApplicationContext:
         self.notifier.information.connect(self._information, Qt.QueuedConnection)
         self.notifier.log.connect(self._log, Qt.QueuedConnection)
 
+    def reset_view(self, view: ViewType) -> None:
+        """Reparent the context under a new top-level widget"""
+        # This is used when the DAG is left open after the main window is closed.
+        self.view = view
+        self.notifier.setParent(view)
+        self.command_bus.setParent(view)
+        self.runtask.setParent(view)
+
     def _command(self, title, cmd, status, out, err) -> None:
         Interaction.command(title, cmd, status, out, err)
 
