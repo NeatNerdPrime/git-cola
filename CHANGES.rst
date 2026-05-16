@@ -38,6 +38,11 @@ Usability, bells and whistles
 
 Fixes
 -----
+* Closing the main window after opening a DAG window was causing errors
+  when interacting with the DAG that have now been fixed.
+  (`#1592 <https://github.com/git-cola/git-cola/issues/1592>`_)
+  (`#1594 <https://github.com/git-cola/git-cola/pull/1594>`_)
+
 * The DAG's gravatar icon size was improved when using hi-DPI displays.
   (`#1577 <https://github.com/git-cola/git-cola/pull/1577>`_)
 
